@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { mockUsers } from "@/data/mockUsers";
-import { Call, CallType, User } from "@/types/call";
+import { supabase } from "@/integrations/supabase/client";
+import { Call, CallType } from "@/types/call";
 import { UserList } from "@/components/UserList";
 import { CallHistory } from "@/components/CallHistory";
 import { CallNotification } from "@/components/CallNotification";
@@ -10,37 +10,145 @@ import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
 import { LogOut, Phone } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { usePresence } from "@/hooks/usePresence";
+import { useSIP } from "@/hooks/useSIP";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState(mockUsers);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [sipConfig, setSipConfig] = useState<any>(null);
   const [calls, setCalls] = useState<Call[]>([]);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
 
+  // Use real-time presence hook
+  const users = usePresence(currentUser?.id || null);
+
+  // Use SIP hook (will be configured once we have SIP credentials)
+  const sip = useSIP(sipConfig);
+
   useEffect(() => {
-    const userId = localStorage.getItem("currentUserId");
-    if (!userId) {
-      navigate("/");
-      return;
-    }
-    const user = mockUsers.find((u) => u.id === userId);
-    if (user) {
-      setCurrentUser(user);
-    }
+    // Check authentication
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        navigate("/auth");
+        return;
+      }
+
+      // Fetch user profile
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .single()
+        .then(({ data, error }) => {
+          if (error) {
+            console.error("Error fetching profile:", error);
+            return;
+          }
+          setCurrentUser(data);
+        });
+
+      // TODO: Fetch SIP credentials for this user
+      // For now, we'll need to configure this
+      // setSipConfig({
+      //   server: "wss://voip.techwithharsh.in:8089/ws",
+      //   username: data.username,
+      //   password: "user_sip_password",
+      //   domain: "voip.techwithharsh.in"
+      // });
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        navigate("/auth");
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("currentUserId");
-    navigate("/");
+  // Fetch call history
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const fetchCallHistory = async () => {
+      const { data, error } = await supabase
+        .from("call_history")
+        .select(`
+          *,
+          caller:caller_id(id, name, username, avatar),
+          receiver:receiver_id(id, name, username, avatar)
+        `)
+        .or(`caller_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error("Error fetching call history:", error);
+        return;
+      }
+
+      // Transform data to match Call interface
+      const transformedCalls = data?.map((call: any) => ({
+        id: call.id,
+        caller: call.caller,
+        receiver: call.receiver,
+        type: call.call_type,
+        startTime: new Date(call.start_time),
+        endTime: call.end_time ? new Date(call.end_time) : undefined,
+        duration: call.duration,
+        status: call.status,
+      })) || [];
+
+      setCalls(transformedCalls);
+    };
+
+    fetchCallHistory();
+  }, [currentUser]);
+
+  // Listen for incoming SIP calls
+  useEffect(() => {
+    if (sip.incomingCall && !incomingCall) {
+      // Create Call object from SIP invitation
+      const caller = users.find(u => u.username === sip.incomingCall?.remoteIdentity.uri.user);
+      
+      if (caller && currentUser) {
+        const newCall: Call = {
+          id: Date.now().toString(),
+          caller: caller,
+          receiver: currentUser,
+          type: "audio", // Default to audio, can be enhanced
+          startTime: new Date(),
+          status: "ringing",
+        };
+        
+        setIncomingCall(newCall);
+        
+        toast({
+          title: "Incoming Call",
+          description: `${caller.name} is calling you`,
+        });
+      }
+    }
+  }, [sip.incomingCall, users, currentUser, incomingCall]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/auth");
   };
 
-  const handleCall = (receiverId: string, type: CallType) => {
+  const handleCall = async (receiverId: string, type: CallType) => {
     if (!currentUser) return;
 
     const receiver = users.find((u) => u.id === receiverId);
     if (!receiver) return;
+
+    // Use SIP.js to make the call
+    if (sipConfig) {
+      await sip.makeCall(receiver.username, type);
+    }
 
     const newCall: Call = {
       id: Date.now().toString(),
@@ -51,18 +159,26 @@ export default function Dashboard() {
       status: "ringing",
     };
 
-    // Simulate incoming call for demo
-    setTimeout(() => {
-      setIncomingCall(newCall);
-      toast({
-        title: "Calling...",
-        description: `Calling ${receiver.name}`,
-      });
-    }, 500);
+    // Store call in database
+    await supabase.from("call_history").insert({
+      caller_id: currentUser.id,
+      receiver_id: receiverId,
+      call_type: type,
+      status: "ringing",
+      start_time: new Date().toISOString(),
+    });
+
+    toast({
+      title: "Calling...",
+      description: `Calling ${receiver.name}`,
+    });
   };
 
-  const handleAcceptCall = () => {
+  const handleAcceptCall = async () => {
     if (!incomingCall) return;
+
+    // Answer using SIP.js
+    await sip.answerCall();
 
     const updatedCall = {
       ...incomingCall,
@@ -72,15 +188,29 @@ export default function Dashboard() {
 
     setActiveCall(updatedCall);
     setIncomingCall(null);
-    
+
+    // Update call in database
+    await supabase
+      .from("call_history")
+      .update({
+        status: "active",
+        start_time: new Date().toISOString(),
+      })
+      .eq("caller_id", incomingCall.caller.id)
+      .eq("receiver_id", incomingCall.receiver.id)
+      .eq("status", "ringing");
+
     toast({
       title: "Call connected",
       description: `Connected with ${updatedCall.caller.name}`,
     });
   };
 
-  const handleDeclineCall = () => {
+  const handleDeclineCall = async () => {
     if (!incomingCall) return;
+
+    // End call using SIP.js
+    sip.endCall();
 
     const missedCall = {
       ...incomingCall,
@@ -91,7 +221,19 @@ export default function Dashboard() {
 
     setCalls([missedCall, ...calls]);
     setIncomingCall(null);
-    
+
+    // Update call in database
+    await supabase
+      .from("call_history")
+      .update({
+        status: "missed",
+        end_time: new Date().toISOString(),
+        duration: 0,
+      })
+      .eq("caller_id", incomingCall.caller.id)
+      .eq("receiver_id", incomingCall.receiver.id)
+      .eq("status", "ringing");
+
     toast({
       title: "Call declined",
       description: "Call was declined",
@@ -99,8 +241,11 @@ export default function Dashboard() {
     });
   };
 
-  const handleEndCall = () => {
+  const handleEndCall = async () => {
     if (!activeCall) return;
+
+    // End call using SIP.js
+    sip.endCall();
 
     const duration = Math.floor((Date.now() - activeCall.startTime.getTime()) / 1000);
     const endedCall = {
@@ -112,7 +257,17 @@ export default function Dashboard() {
 
     setCalls([endedCall, ...calls]);
     setActiveCall(null);
-    
+
+    // Update call in database
+    await supabase
+      .from("call_history")
+      .update({
+        status: "ended",
+        end_time: new Date().toISOString(),
+        duration,
+      })
+      .eq("id", activeCall.id);
+
     toast({
       title: "Call ended",
       description: `Call duration: ${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, "0")}`,
@@ -120,7 +275,14 @@ export default function Dashboard() {
   };
 
   if (!currentUser) {
-    return null;
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -132,16 +294,21 @@ export default function Dashboard() {
             <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10">
               <Phone className="h-5 w-5 text-primary" />
             </div>
-            <h1 className="text-xl font-bold">SIP Calling App</h1>
+            <div>
+              <h1 className="text-xl font-bold">SIP Calling App</h1>
+              {sipConfig && (
+                <p className="text-xs text-muted-foreground">
+                  {sip.isRegistered ? "✓ Registered" : "⏳ Connecting..."}
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <UserAvatar user={currentUser} size="sm" />
               <div className="text-right">
                 <p className="font-medium text-sm">{currentUser.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">
-                  {currentUser.status}
-                </p>
+                <p className="text-xs text-muted-foreground">@{currentUser.username}</p>
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
@@ -153,6 +320,14 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
+        {!sipConfig && (
+          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">
+              ⚠️ SIP not configured. Please configure your Asterisk server credentials to enable calling.
+            </p>
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <UserList
             users={users}

@@ -14,7 +14,113 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      call_history: {
+        Row: {
+          call_type: string
+          caller_id: string
+          created_at: string | null
+          duration: number | null
+          end_time: string | null
+          id: string
+          receiver_id: string
+          start_time: string
+          status: string
+        }
+        Insert: {
+          call_type: string
+          caller_id: string
+          created_at?: string | null
+          duration?: number | null
+          end_time?: string | null
+          id?: string
+          receiver_id: string
+          start_time?: string
+          status: string
+        }
+        Update: {
+          call_type?: string
+          caller_id?: string
+          created_at?: string | null
+          duration?: number | null
+          end_time?: string | null
+          id?: string
+          receiver_id?: string
+          start_time?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_history_caller_id_fkey"
+            columns: ["caller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_history_receiver_id_fkey"
+            columns: ["receiver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar: string | null
+          created_at: string | null
+          id: string
+          name: string
+          updated_at: string | null
+          username: string
+        }
+        Insert: {
+          avatar?: string | null
+          created_at?: string | null
+          id: string
+          name: string
+          updated_at?: string | null
+          username: string
+        }
+        Update: {
+          avatar?: string | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+          username?: string
+        }
+        Relationships: []
+      }
+      user_status: {
+        Row: {
+          last_seen: string | null
+          status: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          last_seen?: string | null
+          status?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          last_seen?: string | null
+          status?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_status_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
