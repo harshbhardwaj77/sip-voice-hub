@@ -8,6 +8,7 @@ import { CallNotification } from "@/components/CallNotification";
 import { CallInterface } from "@/components/CallInterface";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/UserAvatar";
+import { ProfileSettings } from "@/components/ProfileSettings";
 import { LogOut, Phone } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { usePresence } from "@/hooks/usePresence";
@@ -134,6 +135,38 @@ export default function Dashboard() {
       }
     }
   }, [sip.incomingCall, users, currentUser, incomingCall]);
+
+  const handleProfileUpdate = async () => {
+    // Refetch user profile after update
+    const { data: session } = await supabase.auth.getSession();
+    if (session?.session?.user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.session.user.id)
+        .single();
+
+      if (profile) {
+        setCurrentUser({
+          id: profile.id,
+          name: profile.name,
+          username: profile.username,
+          status: 'online',
+          avatar: profile.avatar,
+        });
+
+        // Update SIP config if password is set
+        if (profile.sip_password) {
+          setSipConfig({
+            server: "wss://voip.techwithharsh.in/ws",
+            username: profile.username,
+            password: profile.sip_password,
+            domain: "voip.techwithharsh.in",
+          });
+        }
+      }
+    }
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -312,6 +345,7 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground">@{currentUser.username}</p>
               </div>
             </div>
+            <ProfileSettings user={currentUser} onUpdate={handleProfileUpdate} />
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4" />
             </Button>

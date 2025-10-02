@@ -16,6 +16,7 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
+  const [sipPassword, setSipPassword] = useState("");
 
   useEffect(() => {
     // Check if user is already logged in
@@ -54,7 +55,7 @@ export default function Auth() {
         });
       } else {
         // Sign up
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -67,6 +68,14 @@ export default function Auth() {
         });
 
         if (error) throw error;
+
+        // Update profile with SIP password if provided
+        if (data.user && sipPassword) {
+          await supabase
+            .from("profiles")
+            .update({ sip_password: sipPassword })
+            .eq("id", data.user.id);
+        }
 
         toast({
           title: "Success",
@@ -121,6 +130,19 @@ export default function Auth() {
                   onChange={(e) => setUsername(e.target.value)}
                   required
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sipPassword">SIP Password (Optional)</Label>
+                <Input
+                  id="sipPassword"
+                  type="password"
+                  placeholder="Your Asterisk SIP password"
+                  value={sipPassword}
+                  onChange={(e) => setSipPassword(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  You can add this later in profile settings
+                </p>
               </div>
             </>
           )}
