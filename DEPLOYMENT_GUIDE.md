@@ -45,71 +45,53 @@ npm ci
 npm run build
 ```
 
-### 3. Nginx Configuration
+### 3. Nginx Configuration ⚠️ IMPORTANT
 
-Your Nginx should already be configured for the domain, but ensure it has:
+**Your current Nginx config has a small issue.** Change this line:
 
 ```nginx
-server {
-    listen 443 ssl http2;
-    server_name voip.techwithharsh.in;
+# ❌ WRONG - Double TLS encryption
+proxy_pass https://127.0.0.1:8089/ws;
 
-    # SSL certificates (Let's Encrypt)
-    ssl_certificate /etc/letsencrypt/live/voip.techwithharsh.in/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/voip.techwithharsh.in/privkey.pem;
+# ✅ CORRECT - Let Nginx handle TLS termination
+proxy_pass http://127.0.0.1:8088/ws;
+```
 
-    # Root directory for the built app
-    root /var/www/voip.techwithharsh.in;
-    index index.html;
+**Complete WebSocket location block should be:**
 
-    # SPA fallback - serve index.html for all routes
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # WebSocket proxy for Asterisk SIP
-    location /ws {
-        proxy_pass http://127.0.0.1:8089/ws;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 86400;
-    }
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
+```nginx
+location /ws {
+    proxy_pass http://127.0.0.1:8088/ws;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header Origin $scheme://$host;
+    proxy_read_timeout 86400;
+    proxy_send_timeout 86400;
+    proxy_buffering off;
 }
 ```
 
-After updating Nginx config:
+After updating:
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 4. Asterisk Configuration Verification
+**Why this change?**
+- Asterisk http.conf shows both port 8088 (HTTP) and 8089 (HTTPS/TLS)
+- Your Nginx already handles TLS for the domain
+- Proxying to the non-TLS port (8088) avoids double encryption and is more efficient
 
-Ensure your Asterisk `http.conf` has:
+### 4. Asterisk Configuration ✅ Already Correct
 
-```ini
-[general]
-enabled=yes
-bindaddr=127.0.0.1
-bindport=8089
+Your `http.conf` is already properly configured:
+- ✅ HTTP on port 8088 (for Nginx proxy)
+- ✅ HTTPS/WSS on port 8089 (backup)
+- ✅ TLS certificates configured
 
-[websocket]
-enabled=yes
-```
-
-Restart Asterisk:
-```bash
-sudo systemctl restart asterisk
-```
+Your `pjsip.conf` is also correct with WebRTC transport and 4 users configured.
 
 ### 5. Firewall Configuration
 
@@ -143,21 +125,17 @@ Users need to:
 
 ### 2. Asterisk User Configuration
 
-For each user, add to Asterisk `sip.conf` or `pjsip.conf`:
+**Your existing users in pjsip.conf:**
+- Username: `ram`, Password: `ram123`
+- Username: `jitendra`, Password: `jitendra123`
+- Username: `harsh`, Password: `harsh123`
+- Username: `john`, Password: `john123`
 
-```ini
-[username]
-type=friend
-secret=user_sip_password
-host=dynamic
-context=internal
-transport=ws,wss
-directmedia=no
-nat=force_rport,comedia
-allow=ulaw,alaw,opus
-```
+**CRITICAL:** When users sign up in the app, they must:
+1. Use their Asterisk username (e.g., "ram")
+2. Set their SIP password in Profile Settings to match Asterisk (e.g., "ram123")
 
-Or use Asterisk Realtime with MySQL/PostgreSQL.
+The app's `sip_password` field MUST match the password in pjsip.conf for authentication to work.
 
 ### 3. Testing
 
