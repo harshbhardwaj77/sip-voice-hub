@@ -47,16 +47,17 @@ export default function Dashboard() {
             return;
           }
           setCurrentUser(data);
-        });
 
-      // TODO: Fetch SIP credentials for this user
-      // For now, we'll need to configure this
-      // setSipConfig({
-      //   server: "wss://voip.techwithharsh.in:8089/ws",
-      //   username: data.username,
-      //   password: "user_sip_password",
-      //   domain: "voip.techwithharsh.in"
-      // });
+          // Set SIP configuration with user's SIP password
+          if (data?.sip_password) {
+            setSipConfig({
+              server: "wss://voip.techwithharsh.in/ws",
+              username: data.username,
+              password: data.sip_password,
+              domain: "voip.techwithharsh.in",
+            });
+          }
+        });
     });
 
     // Listen for auth state changes
@@ -323,7 +324,7 @@ export default function Dashboard() {
         {!sipConfig && (
           <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
             <p className="text-sm text-yellow-600 dark:text-yellow-400">
-              ⚠️ SIP not configured. Please configure your Asterisk server credentials to enable calling.
+              ⚠️ SIP not configured. Please set your SIP password in your profile settings to enable calling.
             </p>
           </div>
         )}
