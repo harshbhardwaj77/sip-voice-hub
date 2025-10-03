@@ -136,6 +136,14 @@ export default function Dashboard() {
     }
   }, [sip.incomingCall, users, currentUser, incomingCall]);
 
+  // Clear active call when SIP session ends
+  useEffect(() => {
+    if (!sip.isInCall && activeCall) {
+      console.log('SIP session ended, clearing active call');
+      handleEndCall();
+    }
+  }, [sip.isInCall, activeCall]);
+
   const handleProfileUpdate = async () => {
     // Refetch user profile after update
     const { data: session } = await supabase.auth.getSession();
@@ -179,11 +187,6 @@ export default function Dashboard() {
     const receiver = users.find((u) => u.id === receiverId);
     if (!receiver) return;
 
-    // Use SIP.js to make the call
-    if (sipConfig) {
-      await sip.makeCall(receiver.username, type);
-    }
-
     const newCall: Call = {
       id: Date.now().toString(),
       caller: currentUser,
@@ -192,6 +195,14 @@ export default function Dashboard() {
       startTime: new Date(),
       status: "ringing",
     };
+
+    // Set active call FIRST so caller sees the interface
+    setActiveCall(newCall);
+
+    // Use SIP.js to make the call
+    if (sipConfig) {
+      await sip.makeCall(receiver.username, type);
+    }
 
     // Store call in database
     await supabase.from("call_history").insert({
@@ -388,6 +399,8 @@ export default function Dashboard() {
           call={activeCall}
           currentUserId={currentUser.id}
           onEndCall={handleEndCall}
+          localStream={sip.localStream}
+          remoteStream={sip.remoteStream}
         />
       )}
     </div>

@@ -93,32 +93,37 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
   }, [config]);
 
   const setupSessionHandlers = useCallback((session: any) => {
+    console.log('Setting up session handlers');
+    
     session.stateChange.addListener((state: SessionState) => {
       console.log('Session state:', state);
       
       switch (state) {
         case SessionState.Established:
+          console.log('Call established');
           setIsInCall(true);
           setCurrentSession(session);
           
-          // Setup remote media
+          // Setup remote media with proper audio playback
+          const pc = session.sessionDescriptionHandler.peerConnection;
           const remoteMediaElement = new Audio();
+          remoteMediaElement.autoplay = true;
           const remoteStream = new MediaStream();
           
-          session.sessionDescriptionHandler.peerConnection
-            .getReceivers()
-            .forEach((receiver: RTCRtpReceiver) => {
-              if (receiver.track) {
-                remoteStream.addTrack(receiver.track);
-              }
-            });
+          pc.getReceivers().forEach((receiver: RTCRtpReceiver) => {
+            if (receiver.track) {
+              console.log('Adding remote track:', receiver.track.kind);
+              remoteStream.addTrack(receiver.track);
+            }
+          });
           
           remoteMediaElement.srcObject = remoteStream;
-          remoteMediaElement.play();
+          remoteMediaElement.play().catch(e => console.error('Failed to play remote audio:', e));
           setRemoteStream(remoteStream);
           break;
           
         case SessionState.Terminated:
+          console.log('Call terminated');
           setIsInCall(false);
           setCurrentSession(null);
           setIncomingCall(null);
@@ -141,7 +146,9 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
       return;
     }
 
-    // Get user media
+    console.log(`Making ${mediaType} call to ${target}`);
+
+    // Get user media first
     const constraints = {
       audio: true,
       video: mediaType === 'video',
@@ -149,6 +156,7 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('Got local media stream:', stream.getTracks().map(t => t.kind));
       setLocalStream(stream);
 
       const inviter = new Inviter(userAgentRef.current, targetURI, {
@@ -161,13 +169,26 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
       });
 
       setupSessionHandlers(inviter);
+      setCurrentSession(inviter);
+      setIsInCall(true); // Set this immediately so caller sees the interface
 
       // Send INVITE
-      await inviter.invite();
-      setCurrentSession(inviter);
+      await inviter.invite({
+        sessionDescriptionHandlerOptions: {
+          constraints: {
+            audio: true,
+            video: mediaType === 'video',
+          },
+        },
+      });
+      
+      console.log('INVITE sent successfully');
       
     } catch (error) {
       console.error('Failed to make call:', error);
+      setIsInCall(false);
+      setCurrentSession(null);
+      setLocalStream(null);
     }
   }, [config, setupSessionHandlers]);
 
@@ -177,15 +198,27 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
       return;
     }
 
+    console.log('Answering incoming call');
+
     try {
-      // Get user media
+      // Get user media (match the call type from invitation)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: true,
+        video: false, // For now, default to audio only
       });
+      console.log('Got local media stream for answer:', stream.getTracks().map(t => t.kind));
       setLocalStream(stream);
 
-      await incomingCall.accept();
+      await incomingCall.accept({
+        sessionDescriptionHandlerOptions: {
+          constraints: {
+            audio: true,
+            video: false,
+          },
+        },
+      });
+      
+      console.log('Call accepted successfully');
       setCurrentSession(incomingCall);
       
     } catch (error) {

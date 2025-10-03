@@ -5,14 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Mic, MicOff, Video, VideoOff, PhoneOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAudioLevel } from "@/hooks/useAudioLevel";
 
 interface CallInterfaceProps {
   call: Call;
   currentUserId: string;
   onEndCall: () => void;
+  localStream?: MediaStream | null;
+  remoteStream?: MediaStream | null;
 }
 
-export function CallInterface({ call, currentUserId, onEndCall }: CallInterfaceProps) {
+export function CallInterface({ call, currentUserId, onEndCall, localStream, remoteStream }: CallInterfaceProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(call.type === "video");
   
@@ -20,6 +23,28 @@ export function CallInterface({ call, currentUserId, onEndCall }: CallInterfaceP
   const callDuration = call.startTime ? Math.floor((Date.now() - call.startTime.getTime()) / 1000) : 0;
   const minutes = Math.floor(callDuration / 60);
   const seconds = callDuration % 60;
+
+  // Detect audio levels for speaking indicator
+  const isLocalSpeaking = useAudioLevel(localStream);
+  const isRemoteSpeaking = useAudioLevel(remoteStream);
+
+  const handleMuteToggle = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = isMuted;
+      });
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const handleVideoToggle = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = !isVideoOn;
+      });
+      setIsVideoOn(!isVideoOn);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-background/95 backdrop-blur z-50 flex items-center justify-center">
@@ -36,7 +61,13 @@ export function CallInterface({ call, currentUserId, onEndCall }: CallInterfaceP
               </div>
             ) : (
               <div className="text-center">
-                <UserAvatar user={otherUser} size="xl" showStatus={false} />
+                <div className="relative inline-block">
+                  <UserAvatar user={otherUser} size="xl" showStatus={false} />
+                  {/* Speaking indicator ripple */}
+                  {isRemoteSpeaking && (
+                    <div className="absolute inset-0 rounded-full animate-ping bg-primary/30" />
+                  )}
+                </div>
                 <h2 className="text-2xl font-bold mt-4">{otherUser.name}</h2>
                 <p className="text-muted-foreground mt-2">
                   {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
@@ -56,18 +87,24 @@ export function CallInterface({ call, currentUserId, onEndCall }: CallInterfaceP
           <div className="p-8">
             <div className="flex items-center justify-center gap-4">
               {/* Mute Button */}
-              <Button
-                size="lg"
-                variant={isMuted ? "destructive" : "secondary"}
-                className="rounded-full h-14 w-14 p-0"
-                onClick={() => setIsMuted(!isMuted)}
-              >
-                {isMuted ? (
-                  <MicOff className="h-6 w-6" />
-                ) : (
-                  <Mic className="h-6 w-6" />
+              <div className="relative">
+                <Button
+                  size="lg"
+                  variant={isMuted ? "destructive" : "secondary"}
+                  className="rounded-full h-14 w-14 p-0"
+                  onClick={handleMuteToggle}
+                >
+                  {isMuted ? (
+                    <MicOff className="h-6 w-6" />
+                  ) : (
+                    <Mic className="h-6 w-6" />
+                  )}
+                </Button>
+                {/* Speaking indicator for local user */}
+                {!isMuted && isLocalSpeaking && (
+                  <div className="absolute inset-0 rounded-full animate-ping bg-primary/30" />
                 )}
-              </Button>
+              </div>
 
               {/* End Call Button */}
               <Button
@@ -85,7 +122,7 @@ export function CallInterface({ call, currentUserId, onEndCall }: CallInterfaceP
                   size="lg"
                   variant={isVideoOn ? "secondary" : "destructive"}
                   className="rounded-full h-14 w-14 p-0"
-                  onClick={() => setIsVideoOn(!isVideoOn)}
+                  onClick={handleVideoToggle}
                 >
                   {isVideoOn ? (
                     <Video className="h-6 w-6" />
