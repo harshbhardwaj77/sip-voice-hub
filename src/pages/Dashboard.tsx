@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Call, CallType } from "@/types/call";
@@ -115,13 +115,17 @@ export default function Dashboard() {
     if (sip.incomingCall && !incomingCall) {
       // Create Call object from SIP invitation
       const caller = users.find(u => u.username === sip.incomingCall?.remoteIdentity.uri.user);
+
+      // Infer media type from SDP
+      const sdp: string = (sip.incomingCall as any)?.request?.message?.body || (sip.incomingCall as any)?.request?.body || '';
+      const mediaType: CallType = /m=video/.test(sdp) ? 'video' : 'audio';
       
       if (caller && currentUser) {
         const newCall: Call = {
           id: Date.now().toString(),
           caller: caller,
           receiver: currentUser,
-          type: "audio", // Default to audio, can be enhanced
+          type: mediaType,
           startTime: new Date(),
           status: "ringing",
         };
@@ -136,12 +140,15 @@ export default function Dashboard() {
     }
   }, [sip.incomingCall, users, currentUser, incomingCall]);
 
-  // Clear active call when SIP session ends
+  // Clear active call when SIP session ends (only when transitioning from true -> false)
+  const prevIsInCallRef = useRef(sip.isInCall);
   useEffect(() => {
-    if (!sip.isInCall && activeCall) {
+    const wasInCall = prevIsInCallRef.current;
+    if (wasInCall && !sip.isInCall && activeCall) {
       console.log('SIP session ended, clearing active call');
       handleEndCall();
     }
+    prevIsInCallRef.current = sip.isInCall;
   }, [sip.isInCall, activeCall]);
 
   const handleProfileUpdate = async () => {
@@ -222,8 +229,8 @@ export default function Dashboard() {
   const handleAcceptCall = async () => {
     if (!incomingCall) return;
 
-    // Answer using SIP.js
-    await sip.answerCall();
+    // Answer using SIP.js with the correct media type
+    await sip.answerCall(incomingCall.type);
 
     const updatedCall = {
       ...incomingCall,

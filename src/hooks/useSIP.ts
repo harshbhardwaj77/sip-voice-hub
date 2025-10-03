@@ -13,7 +13,7 @@ interface UseSIPReturn {
   isInCall: boolean;
   currentSession: any;
   makeCall: (target: string, mediaType: 'audio' | 'video') => Promise<void>;
-  answerCall: () => Promise<void>;
+  answerCall: (mediaType?: 'audio' | 'video') => Promise<void>;
   endCall: () => void;
   incomingCall: Invitation | null;
   localStream: MediaStream | null;
@@ -50,11 +50,21 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
       authorizationPassword: config.password,
       transportOptions,
       uri,
+      sessionDescriptionHandlerFactoryOptions: {
+        peerConnectionConfiguration: {
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        },
+      },
       delegate: {
         onInvite: (invitation: Invitation) => {
           console.log('Incoming call from:', invitation.remoteIdentity.uri.user);
+          // Prevent duplicate incoming calls if already handling one or in a call
+          if (incomingCall || isInCall) {
+            console.warn('Already in call or ringing; rejecting new invitation');
+            try { invitation.reject(); } catch (e) { console.error('Failed to reject duplicate invite', e); }
+            return;
+          }
           setIncomingCall(invitation);
-          
           // Setup session handlers
           setupSessionHandlers(invitation);
         },
@@ -109,7 +119,14 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
           const remoteMediaElement = new Audio();
           remoteMediaElement.autoplay = true;
           const remoteStream = new MediaStream();
-          
+
+          pc.addEventListener('track', (event: RTCTrackEvent) => {
+            if (event.track) {
+              console.log('Remote track event:', event.track.kind);
+              remoteStream.addTrack(event.track);
+            }
+          });
+
           pc.getReceivers().forEach((receiver: RTCRtpReceiver) => {
             if (receiver.track) {
               console.log('Adding remote track:', receiver.track.kind);
@@ -165,12 +182,16 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
             audio: true,
             video: mediaType === 'video',
           },
+          peerConnectionOptions: {
+            rtcConfiguration: {
+              iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+            },
+          },
         },
       });
 
       setupSessionHandlers(inviter);
       setCurrentSession(inviter);
-      setIsInCall(true); // Set this immediately so caller sees the interface
 
       // Send INVITE
       await inviter.invite({
@@ -192,7 +213,7 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
     }
   }, [config, setupSessionHandlers]);
 
-  const answerCall = useCallback(async () => {
+  const answerCall = useCallback(async (mediaType?: 'audio' | 'video') => {
     if (!incomingCall) {
       console.error('No incoming call to answer');
       return;
@@ -201,10 +222,15 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
     console.log('Answering incoming call');
 
     try {
-      // Get user media (match the call type from invitation)
+      // Infer if offer includes video
+      const sdpText: string = (incomingCall as any)?.request?.message?.body || (incomingCall as any)?.request?.body || '';
+      const offerHasVideo = /m=video/.test(sdpText);
+      const useVideo = mediaType === 'video' || offerHasVideo;
+
+      // Get user media (match the call type)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: false, // For now, default to audio only
+        video: useVideo,
       });
       console.log('Got local media stream for answer:', stream.getTracks().map(t => t.kind));
       setLocalStream(stream);
@@ -213,7 +239,7 @@ export function useSIP(config: SIPConfig | null): UseSIPReturn {
         sessionDescriptionHandlerOptions: {
           constraints: {
             audio: true,
-            video: false,
+            video: useVideo,
           },
         },
       });

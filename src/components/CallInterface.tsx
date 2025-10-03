@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Call } from "@/types/call";
 import { UserAvatar } from "./UserAvatar";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,25 @@ export function CallInterface({ call, currentUserId, onEndCall, localStream, rem
   const callDuration = call.startTime ? Math.floor((Date.now() - call.startTime.getTime()) / 1000) : 0;
   const minutes = Math.floor(callDuration / 60);
   const seconds = callDuration % 60;
+
+  // Media refs
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream as any;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream as any;
+      localVideoRef.current.muted = true;
+      localVideoRef.current.play().catch(() => {});
+    }
+  }, [localStream]);
 
   // Detect audio levels for speaking indicator
   const isLocalSpeaking = useAudioLevel(localStream);
@@ -53,12 +72,7 @@ export function CallInterface({ call, currentUserId, onEndCall, localStream, rem
           {/* Video Area */}
           <div className="aspect-video bg-secondary/50 relative flex items-center justify-center">
             {call.type === "video" && isVideoOn ? (
-              <div className="text-center">
-                <div className="h-32 w-32 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Video className="h-16 w-16 text-primary" />
-                </div>
-                <p className="text-muted-foreground">Video call in progress</p>
-              </div>
+              <video ref={remoteVideoRef} className="absolute inset-0 w-full h-full object-cover" playsInline autoPlay />
             ) : (
               <div className="text-center">
                 <div className="relative inline-block">
@@ -77,8 +91,8 @@ export function CallInterface({ call, currentUserId, onEndCall, localStream, rem
             
             {/* Small self preview for video calls */}
             {call.type === "video" && isVideoOn && (
-              <div className="absolute bottom-4 right-4 w-32 h-24 bg-secondary rounded-lg border-2 border-border flex items-center justify-center">
-                <p className="text-xs text-muted-foreground">Your video</p>
+              <div className="absolute bottom-4 right-4 w-32 h-24 bg-secondary rounded-lg border-2 border-border overflow-hidden">
+                <video ref={localVideoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
               </div>
             )}
           </div>
